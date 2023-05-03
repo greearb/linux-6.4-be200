@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
  * Copyright (C) 2017 Intel Deutschland GmbH
- * Copyright (C) 2018-2022 Intel Corporation
+ * Copyright (C) 2018-2023 Intel Corporation
  */
 #ifndef __iwl_fw_runtime_h__
 #define __iwl_fw_runtime_h__
@@ -18,7 +18,6 @@
 struct iwl_fw_runtime_ops {
 	void (*dump_start)(void *ctx);
 	void (*dump_end)(void *ctx);
-	bool (*fw_running)(void *ctx);
 	int (*send_hcmd)(void *ctx, struct iwl_host_cmd *host_cmd);
 	bool (*d3_debug_enable)(void *ctx);
 };
@@ -146,14 +145,16 @@ struct iwl_fw_runtime {
 			u32 umac_minor;
 		} fw_ver;
 	} dump;
-#ifdef CONFIG_IWLWIFI_DEBUGFS
 	struct {
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 		struct delayed_work wk;
 		u32 delay;
+#endif
 		u64 seq;
 	} timestamp;
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	bool tpc_enabled;
-#endif /* CONFIG_IWLWIFI_DEBUGFS */
+#endif /* CPTCFG_IWLWIFI_DEBUGFS */
 #ifdef CONFIG_ACPI
 	struct iwl_sar_profile sar_profiles[ACPI_SAR_PROFILE_NUM];
 	u8 sar_chain_a_profile;

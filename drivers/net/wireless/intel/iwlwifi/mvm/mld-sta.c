@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2022 Intel Corporation
+ * Copyright (C) 2022-2023 Intel Corporation
  */
 #include "mvm.h"
 #include "time-sync.h"
@@ -128,11 +128,11 @@ static int iwl_mvm_add_aux_sta_to_fw(struct iwl_mvm *mvm,
 /*
  * Adds an internal sta to the FW table with its queues
  */
-static int iwl_mvm_mld_add_int_sta_with_queue(struct iwl_mvm *mvm,
-					      struct iwl_mvm_int_sta *sta,
-					      const u8 *addr, int link_id,
-					      u16 *queue, u8 tid,
-					      unsigned int *_wdg_timeout)
+int iwl_mvm_mld_add_int_sta_with_queue(struct iwl_mvm *mvm,
+				       struct iwl_mvm_int_sta *sta,
+				       const u8 *addr, int link_id,
+				       u16 *queue, u8 tid,
+				       unsigned int *_wdg_timeout)
 {
 	int ret, txq;
 	unsigned int wdg_timeout = _wdg_timeout ? *_wdg_timeout :
@@ -233,7 +233,8 @@ int iwl_mvm_mld_add_bcast_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 				       IWL_MAX_TID_COUNT, &wdg_timeout);
 }
 
-/* Allocate a new station entry for the broadcast station to the given vif,
+/*
+ * Allocate a new station entry for the broadcast station to the given vif,
  * and send it to the FW.
  * Note that each AP/GO mac should have its own multicast station.
  */
@@ -254,7 +255,8 @@ int iwl_mvm_mld_add_mcast_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 		    vif->type != NL80211_IFTYPE_ADHOC))
 		return -EOPNOTSUPP;
 
-	/* In IBSS, ieee80211_check_queues() sets the cab_queue to be
+	/*
+	 * In IBSS, ieee80211_check_queues() sets the cab_queue to be
 	 * invalid, so make sure we use the queue we want.
 	 * Note that this is done here as we want to avoid making DQA
 	 * changes in mac80211 layer.
@@ -290,7 +292,8 @@ int iwl_mvm_mld_add_aux_sta(struct iwl_mvm *mvm, u32 lmac_id)
 {
 	lockdep_assert_held(&mvm->mutex);
 
-	/* In CDB NICs we need to specify which lmac to use for aux activity;
+	/*
+	 * In CDB NICs we need to specify which lmac to use for aux activity;
 	 * use the link_id argument place to send lmac_id to the function.
 	 */
 	return iwl_mvm_mld_add_int_sta(mvm, &mvm->aux_sta, &mvm->aux_queue,
@@ -364,6 +367,9 @@ int iwl_mvm_mld_rm_bcast_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 
 	lockdep_assert_held(&mvm->mutex);
 
+	if (WARN_ON(!link))
+		return -EIO;
+
 	switch (vif->type) {
 	case NL80211_IFTYPE_AP:
 	case NL80211_IFTYPE_ADHOC:
@@ -382,7 +388,8 @@ int iwl_mvm_mld_rm_bcast_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 				      true, IWL_MAX_TID_COUNT, queueptr);
 }
 
-/* Send the FW a request to remove the station from it's internal data
+/*
+ * Send the FW a request to remove the station from it's internal data
  * structures, and in addition remove it from the local data structure.
  */
 int iwl_mvm_mld_rm_mcast_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
@@ -392,6 +399,9 @@ int iwl_mvm_mld_rm_mcast_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	struct iwl_mvm_vif_link_info *link = mvmvif->link[link_conf->link_id];
 
 	lockdep_assert_held(&mvm->mutex);
+
+	if (WARN_ON(!link))
+		return -EIO;
 
 	return iwl_mvm_mld_rm_int_sta(mvm, &link->mcast_sta, true, 0,
 				      &link->cab_queue);
@@ -442,6 +452,11 @@ static int iwl_mvm_mld_cfg_sta(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 	if (mvm_sta->sta_state >= IEEE80211_STA_ASSOC)
 		cmd.assoc_id = cpu_to_le32(sta->aid);
 
+	if (fw_has_capa(&mvm->fw->ucode_capa,
+			IWL_UCODE_TLV_CAPA_STA_EXP_MFP_SUPPORT) &&
+	    (sta->mfp || mvm_sta->sta_state < IEEE80211_STA_AUTHORIZED))
+		cmd.mfp = cpu_to_le32(1);
+
 	switch (link_sta->rx_nss) {
 	case 1:
 		cmd.mimo = cpu_to_le32(0);
@@ -451,7 +466,7 @@ static int iwl_mvm_mld_cfg_sta(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 		break;
 	}
 
-	switch (sta->deflink.smps_mode) {
+	switch (link_sta->smps_mode) {
 	case IEEE80211_SMPS_AUTOMATIC:
 	case IEEE80211_SMPS_NUM_MODES:
 		WARN_ON(1);
@@ -473,8 +488,7 @@ static int iwl_mvm_mld_cfg_sta(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 	cmd.tx_ampdu_max_size = cpu_to_le32(agg_size);
 
 	if (sta->wme) {
-		cmd.sp_length =
-			cpu_to_le32(sta->max_sp ? sta->max_sp * 2 : 128);
+		cmd.sp_length = cpu_to_le32(sta->max_sp ? sta->max_sp * 2 : 128);
 		cmd.uapsd_acs = cpu_to_le32(iwl_mvm_get_sta_uapsd_acs(sta));
 	}
 
@@ -491,6 +505,11 @@ static int iwl_mvm_mld_cfg_sta(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 		if (link_sta->he_cap.he_cap_elem.mac_cap_info[2] &
 		    IEEE80211_HE_MAC_CAP2_ACK_EN)
 			cmd.ack_enabled = cpu_to_le32(1);
+
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+		if (mvm->trans->dbg_cfg.no_ack_en & 0x2)
+			cmd.ack_enabled = cpu_to_le32(0);
+#endif
 	}
 
 	return iwl_mvm_mld_send_sta_cmd(mvm, &cmd);
@@ -702,6 +721,7 @@ int iwl_mvm_mld_add_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 		if (vif->type == NL80211_IFTYPE_STATION)
 			iwl_mvm_mld_set_ap_sta_id(sta, mvm_vif->link[link_id],
 						  mvm_link_sta);
+
 	}
 
 	return 0;

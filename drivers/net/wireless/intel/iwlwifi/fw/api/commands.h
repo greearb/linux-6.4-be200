@@ -29,6 +29,7 @@
  *	&enum iwl_prot_offload_subcmd_ids
  * @REGULATORY_AND_NVM_GROUP: regulatory/NVM group, uses command IDs from
  *	&enum iwl_regulatory_and_nvm_subcmd_ids
+ * @XVT_GROUP: XVT group, uses command IDs from &enum iwl_xvt_subcmd_ids
  * @DEBUG_GROUP: Debug group, uses command IDs from &enum iwl_debug_cmds
  */
 enum iwl_mvm_command_groups {
@@ -43,6 +44,7 @@ enum iwl_mvm_command_groups {
 	LOCATION_GROUP = 0x8,
 	PROT_OFFLOAD_GROUP = 0xb,
 	REGULATORY_AND_NVM_GROUP = 0xc,
+	XVT_GROUP = 0xe,
 	DEBUG_GROUP = 0xf,
 };
 
@@ -139,11 +141,6 @@ enum iwl_legacy_cmds {
 	REMOVE_STA = 0x19,
 
 	/**
-	 * @FW_GET_ITEM_CMD: uses &struct iwl_fw_get_item_cmd
-	 */
-	FW_GET_ITEM_CMD = 0x1a,
-
-	/**
 	 * @TX_CMD: uses &struct iwl_tx_cmd or &struct iwl_tx_cmd_gen2 or
 	 *	&struct iwl_tx_cmd_gen3,
 	 *	response in &struct iwl_mvm_tx_resp or
@@ -235,6 +232,11 @@ enum iwl_legacy_cmds {
 	NON_QOS_TX_COUNTER_CMD = 0x2d,
 
 	/**
+	 * @FIPS_TEST_VECTOR_CMD: command is &struct iwl_fips_test_cmd
+	 */
+	FIPS_TEST_VECTOR_CMD = 0x3b,
+
+	/**
 	 * @LEDS_CMD: command is &struct iwl_led_cmd
 	 */
 	LEDS_CMD = 0x48,
@@ -267,10 +269,10 @@ enum iwl_legacy_cmds {
 
 	/**
 	 * @WNM_80211V_TIMING_MEASUREMENT_NOTIFICATION: Time Sync
-	 *	measurement notification for TM/FTM. Sent on receipt of
-	 *	respective WNM action frame for TM protocol or public action
-	 *	frame for FTM protocol from peer device along with additional
-	 *	meta data specified in &struct iwl_time_msmt_notify
+	 *	measurement notification for TM/FTM. Sent on receipt of respective
+	 *	WNM action frame for TM protocol or public action frame for FTM
+	 *	protocol from peer device along with additional meta data specified in
+	 *	&struct iwl_time_msmt_notify
 	 */
 	WNM_80211V_TIMING_MEASUREMENT_NOTIFICATION = 0x67,
 
@@ -506,6 +508,11 @@ enum iwl_legacy_cmds {
 	DTS_MEASUREMENT_NOTIFICATION = 0xdd,
 
 	/**
+	 * @DEBUG_HOST_COMMAND: &struct iwl_dhc_cmd
+	 */
+	DEBUG_HOST_COMMAND = 0xf1,
+
+	/**
 	 * @LDBG_CONFIG_CMD: configure continuous trace recording
 	 */
 	LDBG_CONFIG_CMD = 0xf6,
@@ -534,12 +541,6 @@ enum iwl_legacy_cmds {
 	PROT_OFFLOAD_CONFIG_CMD = 0xd4,
 
 	/**
-	 * @OFFLOADS_QUERY_CMD:
-	 * No data in command, response in &struct iwl_wowlan_status
-	 */
-	OFFLOADS_QUERY_CMD = 0xd5,
-
-	/**
 	 * @D0I3_END_CMD: End D0i3/D3 state, no command data
 	 */
 	D0I3_END_CMD = 0xed,
@@ -566,18 +567,22 @@ enum iwl_legacy_cmds {
 	WOWLAN_TKIP_PARAM = 0xe3,
 
 	/**
-	 * @WOWLAN_KEK_KCK_MATERIAL: &struct iwl_wowlan_kek_kck_material_cmd
+	 * @WOWLAN_KEK_KCK_MATERIAL: &struct iwl_wowlan_kek_kck_material_cmd_v2,
+	 * &struct iwl_wowlan_kek_kck_material_cmd_v3 or
+	 * &struct iwl_wowlan_kek_kck_material_cmd_v4
 	 */
 	WOWLAN_KEK_KCK_MATERIAL = 0xe4,
 
 	/**
-	 * @WOWLAN_GET_STATUSES: response in &struct iwl_wowlan_status
+	 * @WOWLAN_GET_STATUSES: response in &struct iwl_wowlan_status_v6,
+	 *	&struct iwl_wowlan_status_v7, &struct iwl_wowlan_status_v9 or
+	 *	&struct iwl_wowlan_status_v12
 	 */
 	WOWLAN_GET_STATUSES = 0xe5,
 
 	/**
-	 * @SCAN_OFFLOAD_PROFILES_QUERY_CMD:
-	 * No command data, response is &struct iwl_scan_offload_profiles_query
+	 * @SCAN_OFFLOAD_PROFILES_QUERY_CMD: No command data, response is
+	 *	&struct iwl_scan_offload_profiles_query_v1
 	 */
 	SCAN_OFFLOAD_PROFILES_QUERY_CMD = 0x56,
 };
@@ -627,6 +632,44 @@ enum iwl_system_subcmd_ids {
 	 * @RFI_DEACTIVATE_NOTIF: &struct iwl_rfi_deactivate_notif
 	 */
 	RFI_DEACTIVATE_NOTIF = 0xff,
+};
+
+/**
+ * enum iwl_xvt_subcmd_ids - XVT group command IDs
+ */
+enum iwl_xvt_subcmd_ids {
+	/**
+	 * @GRP_XVT_GET_SET_PHY_DB_CMD: Get/Set PHY DB Command
+	 * Handled by user space component
+	 */
+	GRP_XVT_GET_SET_PHY_DB_CMD = 0x34,
+
+	/**
+	 * @DTS_MEASUREMENT_TRIGGER_NOTIF : Notification about
+	 * DTS measurement
+	 * Handled by user space component
+	 */
+	DTS_MEASUREMENT_TRIGGER_NOTIF = 0xFC,
+
+	/**
+	 * @MPAPD_EXEC_DONE_NOTIF : Notification about
+	 * MPAPD execution command finished
+	 * Handled by user space component
+	 */
+	MPAPD_EXEC_DONE_NOTIF = 0xFD,
+
+	/**
+	 * @RUN_TIME_CALIB_DONE_NOTIF : Notification about
+	 * runtime calib finished
+	 * Handled by user space component
+	 */
+	RUN_TIME_CALIB_DONE_NOTIF = 0xFE,
+
+	/**
+	 * @IQ_CALIB_CONFIG_NOTIF : Notification about IQ calibration finished
+	 * Handled by user space component
+	 */
+	IQ_CALIB_CONFIG_NOTIF = 0xFF,
 };
 
 #endif /* __iwl_fw_api_commands_h__ */

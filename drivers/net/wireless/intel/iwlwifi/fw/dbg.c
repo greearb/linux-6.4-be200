@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2005-2014, 2018-2021 Intel Corporation
+ * Copyright (C) 2005-2014, 2018-2023 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2015-2017 Intel Deutschland GmbH
  */
@@ -801,8 +801,10 @@ iwl_fw_error_dump_file(struct iwl_fw_runtime *fwrt,
 
 	/* reading RXF/TXF sizes */
 	if (test_bit(STATUS_FW_ERROR, &fwrt->trans->status)) {
-		fifo_len = iwl_fw_rxf_len(fwrt, mem_cfg);
-		fifo_len += iwl_fw_txf_len(fwrt, mem_cfg);
+		if (!IS_ENABLED(CPTCFG_IWLWIFI_DONT_DUMP_FIFOS)) {
+			fifo_len = iwl_fw_rxf_len(fwrt, mem_cfg);
+			fifo_len += iwl_fw_txf_len(fwrt, mem_cfg);
+		}
 
 		/* Make room for PRPH registers */
 		if (iwl_fw_dbg_type_on(fwrt, IWL_FW_ERROR_DUMP_PRPH))
@@ -1038,7 +1040,7 @@ iwl_dump_ini_prph_mac_iter(struct iwl_fw_runtime *fwrt,
 	range->range_data_size = reg->dev_addr.size;
 	for (i = 0; i < le32_to_cpu(reg->dev_addr.size); i += 4) {
 		prph_val = iwl_read_prph(fwrt->trans, addr + i);
-		if ((prph_val & ~0xf) == 0xa5a5a5a0)
+		if (iwl_trans_is_hw_error_value(prph_val))
 			return -EBUSY;
 		*val++ = cpu_to_le32(prph_val);
 	}
@@ -1562,7 +1564,7 @@ iwl_dump_ini_dbgi_sram_iter(struct iwl_fw_runtime *fwrt,
 		prph_data = iwl_read_prph_no_grab(fwrt->trans, (i % 2) ?
 					  DBGI_SRAM_TARGET_ACCESS_RDATA_MSB :
 					  DBGI_SRAM_TARGET_ACCESS_RDATA_LSB);
-		if ((prph_data & ~0xf) == 0xa5a5a5a0) {
+		if (iwl_trans_is_hw_error_value(prph_data)) {
 			iwl_trans_release_nic_access(fwrt->trans);
 			return -EBUSY;
 		}
@@ -2034,7 +2036,6 @@ static u32
 iwl_dump_ini_imr_get_size(struct iwl_fw_runtime *fwrt,
 			  struct iwl_dump_ini_region_data *reg_data)
 {
-	u32 size = 0;
 	u32 ranges = 0;
 	u32 imr_enable = fwrt->trans->dbg.imr_data.imr_enable;
 	u32 imr_size = fwrt->trans->dbg.imr_data.imr_size;
@@ -2044,17 +2045,16 @@ iwl_dump_ini_imr_get_size(struct iwl_fw_runtime *fwrt,
 		IWL_DEBUG_INFO(fwrt,
 			       "WRT: Invalid imr data enable: %d, imr_size: %d, sram_size: %d\n",
 			       imr_enable, imr_size, sram_size);
-		return size;
-	}
-	size = imr_size;
-	ranges = iwl_dump_ini_imr_ranges(fwrt, reg_data);
-	if (!size && !ranges) {
-		IWL_ERR(fwrt, "WRT: imr_size :=%d, ranges :=%d\n", size, ranges);
 		return 0;
 	}
-	size += sizeof(struct iwl_fw_ini_error_dump) +
+	ranges = iwl_dump_ini_imr_ranges(fwrt, reg_data);
+	if (!ranges) {
+		IWL_ERR(fwrt, "WRT: ranges :=%d\n", ranges);
+		return 0;
+	}
+	imr_size += sizeof(struct iwl_fw_ini_error_dump) +
 		ranges * sizeof(struct iwl_fw_ini_error_dump_range);
-	return size;
+	return imr_size;
 }
 
 /**
@@ -2267,7 +2267,7 @@ static u32 iwl_dump_ini_info(struct iwl_fw_runtime *fwrt,
 	 * according to the detected HW
 	 */
 	hw_type = CSR_HW_REV_TYPE(fwrt->trans->hw_rev);
-	if (hw_type == IWL_AX210_HW_TYPE) {
+	if (hw_type == IWL_AX210_HW_TYPE || hw_type == IWL_BNJ_HW_TYPE) {
 		u32 prph_val = iwl_read_umac_prph(fwrt->trans, WFPM_OTP_CFG1_ADDR);
 		u32 is_jacket = !!(prph_val & WFPM_OTP_CFG1_IS_JACKET_BIT);
 		u32 is_cdb = !!(prph_val & WFPM_OTP_CFG1_IS_CDB_BIT);
@@ -2278,8 +2278,9 @@ static u32 iwl_dump_ini_info(struct iwl_fw_runtime *fwrt,
 		 * these bits to the HW type. We won't have collisions since we
 		 * add these bits after the highest possible bit in the mask.
 		 */
-		hw_type |= masked_bits << IWL_AX210_HW_TYPE_ADDITION_SHIFT;
+		hw_type |= masked_bits << IWL_HW_TYPE_ADDITION_SHIFT;
 	}
+
 	dump->hw_type = cpu_to_le32(hw_type);
 
 	dump->rf_id_flavor =
@@ -2328,8 +2329,7 @@ static u32 iwl_dump_ini_file_name_info(struct iwl_fw_runtime *fwrt,
 {
 	struct iwl_fw_ini_dump_entry *entry;
 	struct iwl_dump_file_name_info *tlv;
-	u32 len = strnlen(fwrt->trans->dbg.dump_file_name_ext,
-			  IWL_FW_INI_MAX_NAME);
+	u32 len = strnlen(fwrt->trans->dbg.dump_file_name_ext, IWL_FW_INI_MAX_NAME);
 
 	if (!fwrt->trans->dbg.dump_file_name_ext_valid)
 		return 0;
@@ -2881,6 +2881,12 @@ int iwl_fw_start_dbg_conf(struct iwl_fw_runtime *fwrt, u8 conf_id)
 		IWL_INFO(fwrt, "FW already configured (%d) - re-configuring\n",
 			 fwrt->dump.conf);
 
+#if IS_ENABLED(CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES) && \
+	IS_ENABLED(CPTCFG_IWLMVM)
+	/* start default config marker cmd for syncing logs */
+	if (fwrt->trans->dbg_cfg.enable_timestamp_marker_cmd)
+		iwl_fw_trigger_timestamp(fwrt, 1);
+#endif
 	/* Send all HCMDs for configuring the FW debug */
 	ptr = (void *)&fwrt->fw->dbg.conf_tlv[conf_id]->hcmd;
 	for (i = 0; i < fwrt->fw->dbg.conf_tlv[conf_id]->num_of_hcmds; i++) {
@@ -2955,6 +2961,13 @@ static void iwl_fw_dbg_collect_sync(struct iwl_fw_runtime *fwrt, u8 wk_idx)
 		IWL_ERR(fwrt, "Skip fw error dump since bus is dead\n");
 		goto out;
 	}
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	if (fwrt->trans->dbg_cfg.disable_wrt_dump) {
+		IWL_INFO(fwrt,
+			 "WRT: Data collection disabled by iwl-dbg-cfg.ini\n");
+		goto out;
+	}
+#endif
 
 	iwl_fw_dbg_stop_restart_recording(fwrt, &params, true);
 
@@ -3044,8 +3057,15 @@ void iwl_fw_error_dump_wk(struct work_struct *work)
 {
 	struct iwl_fwrt_wk_data *wks =
 		container_of(work, typeof(*wks), wk.work);
-	struct iwl_fw_runtime *fwrt =
-		container_of(wks, typeof(*fwrt), dump.wks[wks->idx]);
+	struct iwl_fw_runtime *fwrt;
+
+	if (wks->idx >= IWL_FW_RUNTIME_DUMP_WK_NUM) {
+		fwrt = container_of(wks, typeof(*fwrt), dump.wks[0]);
+		IWL_ERR(fwrt, "invalid worker index %d\n", wks->idx);
+		return;
+	}
+
+	fwrt = container_of(wks, typeof(*fwrt), dump.wks[wks->idx]);
 
 	/* assumes the op mode mutex is locked in dump_start since
 	 * iwl_fw_dbg_collect_sync can't run in parallel
@@ -3156,6 +3176,50 @@ static int iwl_fw_dbg_restart_recording(struct iwl_trans *trans,
 	return 0;
 }
 
+int iwl_fw_send_timestamp_marker_cmd(struct iwl_fw_runtime *fwrt)
+{
+	struct iwl_mvm_marker marker = {
+		.dw_len = sizeof(struct iwl_mvm_marker) / 4,
+		.marker_id = MARKER_ID_SYNC_CLOCK,
+	};
+	struct iwl_host_cmd hcmd = {
+		.flags = CMD_ASYNC,
+		.id = WIDE_ID(LONG_GROUP, MARKER_CMD),
+		.dataflags = {},
+	};
+	struct iwl_mvm_marker_rsp *resp;
+	int cmd_ver = iwl_fw_lookup_cmd_ver(fwrt->fw,
+					    WIDE_ID(LONG_GROUP, MARKER_CMD),
+					    IWL_FW_CMD_VER_UNKNOWN);
+	int ret;
+
+	if (cmd_ver == 1) {
+		/* the real timestamp is taken from the ftrace clock
+		 * this is for finding the match between fw and kernel logs
+		 */
+		marker.timestamp = cpu_to_le64(fwrt->timestamp.seq++);
+	} else if (cmd_ver == 2) {
+		marker.timestamp = cpu_to_le64(ktime_get_boottime_ns());
+	} else {
+		IWL_DEBUG_INFO(fwrt,
+			       "Invalid version of Marker CMD. Ver = %d\n",
+			       cmd_ver);
+		return -EINVAL;
+	}
+
+	hcmd.data[0] = &marker;
+	hcmd.len[0] = sizeof(marker);
+
+	ret = iwl_trans_send_cmd(fwrt->trans, &hcmd);
+
+	if (cmd_ver > 1 && hcmd.resp_pkt) {
+		resp = (void *)hcmd.resp_pkt->data;
+		IWL_DEBUG_INFO(fwrt, "FW GP2 time: %u\n", le32_to_cpu(resp->gp2));
+	}
+
+	return ret;
+}
+
 void iwl_fw_dbg_stop_restart_recording(struct iwl_fw_runtime *fwrt,
 				       struct iwl_fw_dbg_params *params,
 				       bool stop)
@@ -3166,13 +3230,16 @@ void iwl_fw_dbg_stop_restart_recording(struct iwl_fw_runtime *fwrt,
 		return;
 
 	if (fw_has_capa(&fwrt->fw->ucode_capa,
-			IWL_UCODE_TLV_CAPA_DBG_SUSPEND_RESUME_CMD_SUPP))
+			IWL_UCODE_TLV_CAPA_DBG_SUSPEND_RESUME_CMD_SUPP)) {
+		if (stop)
+			iwl_fw_send_timestamp_marker_cmd(fwrt);
 		ret = iwl_fw_dbg_suspend_resume_hcmd(fwrt->trans, stop);
-	else if (stop)
+	} else if (stop) {
 		iwl_fw_dbg_stop_recording(fwrt->trans, params);
-	else
+	} else {
 		ret = iwl_fw_dbg_restart_recording(fwrt->trans, params);
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+	}
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	if (!ret) {
 		if (stop)
 			fwrt->trans->dbg.rec_on = false;

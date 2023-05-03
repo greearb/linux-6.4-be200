@@ -493,8 +493,7 @@ static int iwl_mvm_wowlan_config_rsc_tsc(struct iwl_mvm *mvm,
 
 		if (ver == 4) {
 			size = sizeof(*data.rsc_tsc);
-			data.rsc_tsc->sta_id =
-				cpu_to_le32(mvmvif->deflink.ap_sta_id);
+			data.rsc_tsc->sta_id = cpu_to_le32(mvmvif->deflink.ap_sta_id);
 		} else {
 			/* ver == 2 || ver == IWL_FW_CMD_VER_UNKNOWN */
 			size = sizeof(data.rsc_tsc->params);
@@ -1318,7 +1317,7 @@ static int __iwl_mvm_suspend(struct ieee80211_hw *hw,
 	if (ret)
 		goto out;
 
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	if (mvm->d3_wake_sysassert)
 		d3_cfg_cmd_data.wakeup_flags |=
 			cpu_to_le32(IWL_WAKEUP_D3_CONFIG_FW_ERROR);
@@ -1338,7 +1337,7 @@ static int __iwl_mvm_suspend(struct ieee80211_hw *hw,
 	ret = iwl_mvm_send_cmd(mvm, &d3_cfg_cmd);
 	if (ret)
 		goto out;
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	len = iwl_rx_packet_payload_len(d3_cfg_cmd.resp_pkt);
 	if (len >= sizeof(u32)) {
 		mvm->d3_test_pme_ptr =
@@ -1943,7 +1942,7 @@ static bool iwl_mvm_setup_connection_keep(struct iwl_mvm *mvm,
 
 out:
 	if (iwl_fw_lookup_notif_ver(mvm->fw, LONG_GROUP,
-				    WOWLAN_GET_STATUSES, 0) < 10) {
+				    WOWLAN_GET_STATUSES, IWL_FW_CMD_VER_UNKNOWN) < 10) {
 		mvmvif->seqno_valid = true;
 		/* +0x10 because the set API expects next-to-use, not last-used */
 		mvmvif->seqno = status->non_qos_seq_ctr + 0x10;
@@ -2324,7 +2323,7 @@ iwl_mvm_netdetect_query_results(struct iwl_mvm *mvm,
 	results->matched_profiles = le32_to_cpu(query->matched_profiles);
 	memcpy(results->matches, query->matches, matches_len);
 
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	mvm->last_netdetect_scans = le32_to_cpu(query->n_scans_done);
 #endif
 
@@ -2584,8 +2583,7 @@ iwl_mvm_choose_query_wakeup_reasons(struct iwl_mvm *mvm,
 	/* if FW uses status notification, status shouldn't be NULL here */
 	if (!d3_data->status) {
 		struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
-		u8 sta_id = mvm->net_detect ? IWL_MVM_INVALID_STA :
-					      mvmvif->deflink.ap_sta_id;
+		u8 sta_id = mvm->net_detect ? IWL_MVM_INVALID_STA : mvmvif->deflink.ap_sta_id;
 
 		d3_data->status = iwl_mvm_send_wowlan_get_status(mvm, sta_id);
 	}
@@ -2596,7 +2594,7 @@ iwl_mvm_choose_query_wakeup_reasons(struct iwl_mvm *mvm,
 		bool keep = iwl_mvm_query_wakeup_reasons(mvm, vif,
 							 d3_data->status);
 
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 		if (keep)
 			mvm->keep_vif = vif;
 #endif
@@ -2685,7 +2683,7 @@ static void iwl_mvm_nd_match_info_handler(struct iwl_mvm *mvm,
 		return;
 	}
 
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	mvm->last_netdetect_scans = le32_to_cpu(notif->n_scans_done);
 #endif
 
@@ -2712,8 +2710,7 @@ static bool iwl_mvm_wait_d3_notif(struct iwl_notif_wait_data *notif_wait,
 	struct iwl_d3_data *d3_data = data;
 	u32 len;
 	int ret;
-	int wowlan_info_ver = iwl_fw_lookup_notif_ver(mvm->fw,
-						      PROT_OFFLOAD_GROUP,
+	int wowlan_info_ver = iwl_fw_lookup_notif_ver(mvm->fw, PROT_OFFLOAD_GROUP,
 						      WOWLAN_INFO_NOTIFICATION,
 						      IWL_FW_CMD_VER_UNKNOWN);
 
@@ -2847,7 +2844,7 @@ static int iwl_mvm_resume_firmware(struct iwl_mvm *mvm, bool test)
 	return ret;
 }
 
-#define IWL_MVM_D3_NOTIF_TIMEOUT (HZ / 5)
+#define IWL_MVM_D3_NOTIF_TIMEOUT (HZ / 5 * CPTCFG_IWL_TIMEOUT_FACTOR)
 
 static int iwl_mvm_d3_notif_wait(struct iwl_mvm *mvm,
 				 struct iwl_d3_data *d3_data)
@@ -3046,7 +3043,7 @@ void iwl_mvm_set_wakeup(struct ieee80211_hw *hw, bool enabled)
 	device_set_wakeup_enable(mvm->trans->dev, enabled);
 }
 
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 static int iwl_mvm_d3_test_open(struct inode *inode, struct file *file)
 {
 	struct iwl_mvm *mvm = inode->i_private;

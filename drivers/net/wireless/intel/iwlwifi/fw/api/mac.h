@@ -295,7 +295,7 @@ struct iwl_ac_qos {
  * struct iwl_mac_ctx_cmd - command structure to configure MAC contexts
  * ( MAC_CONTEXT_CMD = 0x28 )
  * @id_and_color: ID and color of the MAC
- * @action: action to perform, one of FW_CTXT_ACTION_*
+ * @action: action to perform, see &enum iwl_ctxt_action
  * @mac_type: one of &enum iwl_mac_types
  * @tsf_id: TSF HW timer, one of &enum iwl_tsf_id
  * @node_addr: MAC address
@@ -362,13 +362,31 @@ struct iwl_nonqos_seq_query_cmd {
  * @num_expected_beacons: number of expected beacons
  * @num_recvd_beacons: number of received beacons
  */
-struct iwl_missed_beacons_notif {
+struct iwl_missed_beacons_notif_ver_3 {
 	__le32 mac_id;
 	__le32 consec_missed_beacons_since_last_rx;
 	__le32 consec_missed_beacons;
 	__le32 num_expected_beacons;
 	__le32 num_recvd_beacons;
 } __packed; /* MISSED_BEACON_NTFY_API_S_VER_3 */
+
+/**
+ * struct iwl_missed_beacons_notif - information on missed beacons
+ * ( MISSED_BEACONS_NOTIFICATION = 0xa2 )
+ * @link_id: fw link ID
+ * @consec_missed_beacons_since_last_rx: number of consecutive missed
+ *	beacons since last RX.
+ * @consec_missed_beacons: number of consecutive missed beacons
+ * @num_expected_beacons: number of expected beacons
+ * @num_recvd_beacons: number of received beacons
+ */
+struct iwl_missed_beacons_notif {
+	__le32 link_id;
+	__le32 consec_missed_beacons_since_last_rx;
+	__le32 consec_missed_beacons;
+	__le32 num_expected_beacons;
+	__le32 num_recvd_beacons;
+} __packed; /* MISSED_BEACON_NTFY_API_S_VER_4 */
 
 /**
  * struct iwl_he_backoff_conf - used for backoff configuration
@@ -434,7 +452,7 @@ enum iwl_he_pkt_ext_constellations {
  *	For rates between low_th and high_th, need 8us PPE
  *	For rates equal or higher then the high_th, need 16us PPE
  *	Nss (0-siso, 1-mimo2) x BW (0-20MHz, 1-40MHz, 2-80MHz, 3-160MHz) x
- *		(0-low_th, 1-high_th)
+ *	(0-low_th, 1-high_th)
  */
 struct iwl_he_pkt_ext_v1 {
 	u8 pkt_ext_qam_th[MAX_HE_SUPP_NSS][MAX_CHANNEL_BW_INDX_API_D_VER_2][2];

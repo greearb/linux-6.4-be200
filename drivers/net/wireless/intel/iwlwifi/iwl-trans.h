@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2005-2014, 2018-2022 Intel Corporation
+ * Copyright (C) 2005-2014, 2018-2023 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -17,8 +17,14 @@
 #include "fw/img.h"
 #include "iwl-op-mode.h"
 #include <linux/firmware.h>
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+#include "iwl-dbg-cfg.h"
+#endif
 #include "fw/api/cmdhdr.h"
 #include "fw/api/txq.h"
+#ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
+#include "fw/testmode.h"
+#endif
 #include "fw/api/dbg-tlv.h"
 #include "iwl-dbg-tlv.h"
 
@@ -56,7 +62,15 @@
  *	6) Eventually, the free function will be called.
  */
 
+/* default preset 0 (start from bit 16)*/
+#define IWL_FW_DBG_DOMAIN_POS	16
+#define IWL_FW_DBG_DOMAIN	BIT(IWL_FW_DBG_DOMAIN_POS)
+
+#ifndef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
 #define IWL_TRANS_FW_DBG_DOMAIN(trans)	IWL_FW_INI_DOMAIN_ALWAYS_ON
+#else
+#define IWL_TRANS_FW_DBG_DOMAIN(trans)	((trans)->dbg_cfg.FW_DBG_DOMAIN)
+#endif
 
 #define FH_RSCSR_FRAME_SIZE_MSK		0x00003FFF	/* bits 0-13 */
 #define FH_RSCSR_FRAME_INVALID		0x55550000
@@ -105,6 +119,7 @@ static inline u32 iwl_rx_packet_payload_len(const struct iwl_rx_packet *pkt)
  * @CMD_ASYNC: Return right away and don't wait for the response
  * @CMD_WANT_SKB: Not valid with CMD_ASYNC. The caller needs the buffer of
  *	the response. The caller needs to call iwl_free_resp when done.
+ * @CMD_SEND_IN_RFKILL: Send the command even if the NIC is in RF-kill.
  * @CMD_WANT_ASYNC_CALLBACK: the op_mode's async callback function must be
  *	called after this command completes. Valid only with CMD_ASYNC.
  * @CMD_SEND_IN_D3: Allow the command to be sent in D3 mode, relevant to
@@ -298,6 +313,7 @@ enum iwl_d3_status {
  * @STATUS_TRANS_GOING_IDLE: shutting down the trans, only special commands
  *	are sent
  * @STATUS_TRANS_IDLE: the trans is idle - general commands are not to be sent
+ * @STATUS_TA_ACTIVE: target access is in progress
  * @STATUS_TRANS_DEAD: trans is dead - avoid any read/write operation
  * @STATUS_SUPPRESS_CMD_ERROR_ONCE: suppress "FW error in SYNC CMD" once,
  *	e.g. for testing
@@ -312,6 +328,7 @@ enum iwl_trans_status {
 	STATUS_FW_ERROR,
 	STATUS_TRANS_GOING_IDLE,
 	STATUS_TRANS_IDLE,
+	STATUS_TA_ACTIVE,
 	STATUS_TRANS_DEAD,
 	STATUS_SUPPRESS_CMD_ERROR_ONCE,
 };
@@ -459,6 +476,23 @@ struct iwl_trans_rxq_dma_data {
 	u64 ur_bd_cb;
 };
 
+/* maximal number of DRAM MAP entries supported by FW */
+#define IPC_DRAM_MAP_ENTRY_NUM_MAX 64
+
+/**
+ * struct iwl_pnvm_image - contains info about the parsed pnvm image
+ * @chunks: array of pointers to pnvm payloads and their sizes
+ * @n_chunks: the number of the pnvm payloads.
+ */
+struct iwl_pnvm_image {
+	struct {
+		const void *data;
+		u32 len;
+	} chunks[IPC_DRAM_MAP_ENTRY_NUM_MAX];
+	u32 n_chunks;
+	u32 version;
+};
+
 /**
  * struct iwl_trans_ops - transport specific operations
  *
@@ -541,6 +575,7 @@ struct iwl_trans_rxq_dma_data {
  *	Note that the transport must fill in the proper file headers.
  * @debugfs_cleanup: used in the driver unload flow to make a proper cleanup
  *	of the trans debugfs
+ * @load_pnvm: save the pnvm data in DRAM
  * @set_pnvm: set the pnvm data in the prph scratch buffer, inside the
  *	context info.
  * @interrupts: disable/enable interrupts to transport
@@ -549,6 +584,11 @@ struct iwl_trans_ops {
 
 	int (*start_hw)(struct iwl_trans *iwl_trans);
 	void (*op_mode_leave)(struct iwl_trans *iwl_trans);
+#if IS_ENABLED(CPTCFG_IWLXVT)
+	int (*start_fw_dbg)(struct iwl_trans *trans, const struct fw_img *fw,
+			    bool run_in_rfkill, u32 fw_dbg_flags);
+	int (*test_mode_cmd)(struct iwl_trans *trans, bool enable);
+#endif
 	int (*start_fw)(struct iwl_trans *trans, const struct fw_img *fw,
 			bool run_in_rfkill);
 	void (*fw_alive)(struct iwl_trans *trans, u32 scd_addr);
@@ -614,9 +654,17 @@ struct iwl_trans_ops {
 						 void *sanitize_ctx);
 	void (*debugfs_cleanup)(struct iwl_trans *trans);
 	void (*sync_nmi)(struct iwl_trans *trans);
-	int (*set_pnvm)(struct iwl_trans *trans, const void *data, u32 len);
-	int (*set_reduce_power)(struct iwl_trans *trans,
-				const void *data, u32 len);
+	int (*load_pnvm)(struct iwl_trans *trans,
+			 const struct iwl_pnvm_image *pnvm_payloads,
+			 const struct iwl_ucode_capabilities *capa);
+	void (*set_pnvm)(struct iwl_trans *trans,
+			 const struct iwl_ucode_capabilities *capa);
+	int (*load_reduce_power)(struct iwl_trans *trans,
+				 const struct iwl_pnvm_image *payloads,
+				 const struct iwl_ucode_capabilities *capa);
+	void (*set_reduce_power)(struct iwl_trans *trans,
+				 const struct iwl_ucode_capabilities *capa);
+
 	void (*interrupts)(struct iwl_trans *trans, bool enable);
 	int (*imr_dma_data)(struct iwl_trans *trans,
 			    u32 dst_addr, u64 src_addr,
@@ -690,7 +738,7 @@ enum iwl_ini_cfg_state {
 };
 
 /* Max time to wait for nmi interrupt */
-#define IWL_TRANS_NMI_TIMEOUT (HZ / 4)
+#define IWL_TRANS_NMI_TIMEOUT (HZ / 4 * CPTCFG_IWL_TIMEOUT_FACTOR)
 
 /**
  * struct iwl_dram_data
@@ -702,6 +750,20 @@ struct iwl_dram_data {
 	dma_addr_t physical;
 	void *block;
 	int size;
+};
+
+/**
+ * struct iwl_dram_regions - DRAM regions container structure
+ * @drams: array of several DRAM areas that contains the
+ *	pnvm/power reduction table payloads.
+ * @n_regions: number of DRAM regions that were allocated
+ * @prph_scratch_mem_desc: points to a structure allocated in dram,
+ *	designed to show FW where all the payloads are.
+ */
+struct iwl_dram_regions {
+	struct iwl_dram_data drams[IPC_DRAM_MAP_ENTRY_NUM_MAX];
+	struct iwl_dram_data prph_scratch_mem_desc;
+	u8 n_regions;
 };
 
 /**
@@ -820,8 +882,7 @@ struct iwl_trans_debug {
 	u64 unsupported_region_msk;
 	struct iwl_ucode_tlv *active_regions[IWL_FW_INI_MAX_REGION_ID];
 	struct list_head debug_info_tlv_list;
-	struct iwl_dbg_tlv_time_point_data
-		time_point[IWL_FW_INI_TIME_POINT_NUM];
+	struct iwl_dbg_tlv_time_point_data time_point[IWL_FW_INI_TIME_POINT_NUM];
 	struct list_head periodic_trig_list;
 
 	u32 domains_bitmap;
@@ -874,7 +935,6 @@ struct iwl_pcie_first_tb_buf {
 
 /**
  * struct iwl_txq - Tx Queue for DMA
- * @q: generic Rx/Tx queue descriptor
  * @tfds: transmit frame descriptors (DMA memory)
  * @first_tb_bufs: start of command headers, including scratch buffers, for
  *	the writeback -- this is DMA memory and an array holding one buffer
@@ -894,6 +954,7 @@ struct iwl_pcie_first_tb_buf {
  * @read_ptr: last used entry (index) host_r
  * @dma_addr:  physical addr for BD's
  * @n_window: safe queue window
+ * @n_reduced_win: reduced @n_window in case of HW allocation workarounds
  * @id: queue id
  * @low_mark: low watermark, resume queue if free space more than this
  * @high_mark: high watermark, stop queue if free space less than this
@@ -936,6 +997,7 @@ struct iwl_txq {
 	int read_ptr;
 	dma_addr_t dma_addr;
 	int n_window;
+	int n_reduced_win;
 	u32 id;
 	int low_mark;
 	int high_mark;
@@ -1016,13 +1078,15 @@ struct iwl_trans_txqs {
  *	starting the firmware, used for tracing
  * @rx_mpdu_cmd_hdr_size: used for tracing, amount of data before the
  *	start of the 802.11 header in the @rx_mpdu_cmd
- * @dflt_pwr_limit: default power limit fetched from the platform (ACPI)
  * @system_pm_mode: the system-wide power management mode in use.
  *	This mode is set dynamically, depending on the WoWLAN values
  *	configured from the userspace at runtime.
- * @iwl_trans_txqs: transport tx queues data.
+ * @txqs: transport tx queues data.
  * @mbx_addr_0_step: step address data 0
  * @mbx_addr_1_step: step address data 1
+ * @pcie_link_speed: current PCIe link speed (%PCI_EXP_LNKSTA_CLS_*),
+ *	only valid for discrete (not integrated) NICs
+ * @invalid_tx_cmd: invalid TX command buffer
  */
 struct iwl_trans {
 	bool csme_own;
@@ -1031,6 +1095,7 @@ struct iwl_trans {
 	const struct iwl_cfg_trans_params *trans_cfg;
 	const struct iwl_cfg *cfg;
 	struct iwl_drv *drv;
+	struct iwl_tm_gnl_dev *tmdev;
 	enum iwl_trans_state state;
 	unsigned long status;
 
@@ -1051,7 +1116,9 @@ struct iwl_trans {
 	bool pm_support;
 	bool ltr_enabled;
 	u8 pnvm_loaded:1;
+	u8 fail_to_parse_pnvm_image:1;
 	u8 reduce_power_loaded:1;
+	u8 failed_to_load_reduce_power_image:1;
 
 	const struct iwl_hcmd_arr *command_groups;
 	int command_groups_size;
@@ -1073,15 +1140,26 @@ struct iwl_trans {
 	struct lockdep_map sync_cmd_lockdep_map;
 #endif
 
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	struct iwl_dbg_cfg dbg_cfg;
+#endif
 	struct iwl_trans_debug dbg;
 	struct iwl_self_init_dram init_dram;
 
 	enum iwl_plat_pm_mode system_pm_mode;
 
+#ifdef CPTCFG_IWLWIFI_DEVICE_TESTMODE
+	struct iwl_testmode testmode;
+#endif
+
 	const char *name;
 	struct iwl_trans_txqs txqs;
 	u32 mbx_addr_0_step;
 	u32 mbx_addr_1_step;
+
+	u8 pcie_link_speed;
+
+	struct iwl_dma_ptr invalid_tx_cmd;
 
 	/* pointer to trans specific struct */
 	/*Ensure that this pointer will always be aligned to sizeof pointer */
@@ -1146,6 +1224,37 @@ static inline int iwl_trans_start_fw(struct iwl_trans *trans,
 	return ret;
 }
 
+#if IS_ENABLED(CPTCFG_IWLXVT)
+enum iwl_xvt_dbg_flags {
+	IWL_XVT_DBG_ADC_SAMP_TEST = BIT(0),
+	IWL_XVT_DBG_ADC_SAMP_SYNC_RX = BIT(1),
+};
+
+static inline int iwl_trans_start_fw_dbg(struct iwl_trans *trans,
+					 const struct fw_img *fw,
+					 bool run_in_rfkill,
+					 u32 dbg_flags)
+{
+	int ret;
+
+	might_sleep();
+
+	if (WARN_ON_ONCE(!trans->ops->start_fw_dbg && dbg_flags))
+		return -ENOTSUPP;
+
+	clear_bit(STATUS_FW_ERROR, &trans->status);
+	if (trans->ops->start_fw_dbg)
+		return trans->ops->start_fw_dbg(trans, fw, run_in_rfkill,
+						dbg_flags);
+
+	ret = trans->ops->start_fw(trans, fw, run_in_rfkill);
+	if (ret == 0)
+		trans->state = IWL_TRANS_FW_STARTED;
+
+	return ret;
+}
+#endif
+
 static inline void iwl_trans_stop_device(struct iwl_trans *trans)
 {
 	might_sleep();
@@ -1160,7 +1269,7 @@ static inline int iwl_trans_d3_suspend(struct iwl_trans *trans, bool test,
 {
 	might_sleep();
 	if (!trans->ops->d3_suspend)
-		return 0;
+		return -EOPNOTSUPP;
 
 	return trans->ops->d3_suspend(trans, test, reset);
 }
@@ -1171,7 +1280,7 @@ static inline int iwl_trans_d3_resume(struct iwl_trans *trans,
 {
 	might_sleep();
 	if (!trans->ops->d3_resume)
-		return 0;
+		return -EOPNOTSUPP;
 
 	return trans->ops->d3_resume(trans, status, test, reset);
 }
@@ -1388,6 +1497,15 @@ static inline int iwl_trans_wait_txq_empty(struct iwl_trans *trans, int queue)
 	return trans->ops->wait_txq_empty(trans, queue);
 }
 
+#if IS_ENABLED(CPTCFG_IWLXVT)
+static inline int iwl_trans_test_mode_cmd(struct iwl_trans *trans, bool enable)
+{
+	if (trans->ops->test_mode_cmd)
+		return trans->ops->test_mode_cmd(trans, enable);
+	return -ENOTSUPP;
+}
+#endif
+
 static inline void iwl_trans_write8(struct iwl_trans *trans, u32 ofs, u8 val)
 {
 	trans->ops->write8(trans, ofs, val);
@@ -1440,7 +1558,7 @@ static inline u32 iwl_trans_read_mem32(struct iwl_trans *trans, u32 addr)
 {
 	u32 value;
 
-	if (WARN_ON(iwl_trans_read_mem(trans, addr, &value, 1)))
+	if (iwl_trans_read_mem(trans, addr, &value, 1))
 		return 0xa5a5a5a5;
 
 	return value;
@@ -1515,33 +1633,34 @@ static inline void iwl_trans_sync_nmi(struct iwl_trans *trans)
 void iwl_trans_sync_nmi_with_addr(struct iwl_trans *trans, u32 inta_addr,
 				  u32 sw_err_bit);
 
-static inline int iwl_trans_set_pnvm(struct iwl_trans *trans,
-				     const void *data, u32 len)
+static inline int iwl_trans_load_pnvm(struct iwl_trans *trans,
+				      const struct iwl_pnvm_image *pnvm_data,
+				      const struct iwl_ucode_capabilities *capa)
 {
-	if (trans->ops->set_pnvm) {
-		int ret = trans->ops->set_pnvm(trans, data, len);
-
-		if (ret)
-			return ret;
-	}
-
-	trans->pnvm_loaded = true;
-
-	return 0;
+	return trans->ops->load_pnvm(trans, pnvm_data, capa);
 }
 
-static inline int iwl_trans_set_reduce_power(struct iwl_trans *trans,
-					     const void *data, u32 len)
+static inline void iwl_trans_set_pnvm(struct iwl_trans *trans,
+				      const struct iwl_ucode_capabilities *capa)
 {
-	if (trans->ops->set_reduce_power) {
-		int ret = trans->ops->set_reduce_power(trans, data, len);
+	if (trans->ops->set_pnvm)
+		trans->ops->set_pnvm(trans, capa);
+}
 
-		if (ret)
-			return ret;
-	}
+static inline int iwl_trans_load_reduce_power
+				(struct iwl_trans *trans,
+				 const struct iwl_pnvm_image *payloads,
+				 const struct iwl_ucode_capabilities *capa)
+{
+	return trans->ops->load_reduce_power(trans, payloads, capa);
+}
 
-	trans->reduce_power_loaded = true;
-	return 0;
+static inline void
+iwl_trans_set_reduce_power(struct iwl_trans *trans,
+			   const struct iwl_ucode_capabilities *capa)
+{
+	if (trans->ops->set_reduce_power)
+		trans->ops->set_reduce_power(trans, capa);
 }
 
 static inline bool iwl_trans_dbg_ini_valid(struct iwl_trans *trans)
@@ -1566,11 +1685,32 @@ struct iwl_trans *iwl_trans_alloc(unsigned int priv_size,
 int iwl_trans_init(struct iwl_trans *trans);
 void iwl_trans_free(struct iwl_trans *trans);
 
+static inline bool iwl_trans_is_hw_error_value(u32 val)
+{
+	return ((val & ~0xf) == 0xa5a5a5a0) || ((val & ~0xf) == 0x5a5a5a50);
+}
+
 /*****************************************************
 * driver (transport) register/unregister functions
 ******************************************************/
+/* PCI */
+#ifdef CONFIG_PCI
 int __must_check iwl_pci_register_driver(void);
 void iwl_pci_unregister_driver(void);
 void iwl_trans_pcie_remove(struct iwl_trans *trans, bool rescan);
+#else
+static inline int __must_check iwl_pci_register_driver(void)
+{
+	return 0;
+}
+
+static inline void iwl_pci_unregister_driver(void)
+{
+}
+
+static inline void iwl_trans_pcie_remove(struct iwl_trans *trans, bool rescan)
+{
+}
+#endif /* CONFIG_PCI */
 
 #endif /* __iwl_trans_h__ */

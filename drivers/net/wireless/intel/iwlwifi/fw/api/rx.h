@@ -259,6 +259,7 @@ enum iwl_rx_mpdu_reorder_data {
 };
 
 enum iwl_rx_mpdu_phy_info {
+	IWL_RX_MPDU_PHY_8023		= BIT(0),
 	IWL_RX_MPDU_PHY_AMPDU		= BIT(5),
 	IWL_RX_MPDU_PHY_AMPDU_TOGGLE	= BIT(6),
 	IWL_RX_MPDU_PHY_SHORT_PREAMBLE	= BIT(7),
@@ -292,7 +293,7 @@ enum iwl_rx_phy_he_data0 {
 /* TSF overload low dword */
 enum iwl_rx_phy_eht_data0 {
 	/* info type: EHT any */
-	/* 1 bits reserved */
+	IWL_RX_PHY_DATA0_EHT_VALIDATE				= BIT(0),
 	IWL_RX_PHY_DATA0_EHT_UPLINK				= BIT(1),
 	IWL_RX_PHY_DATA0_EHT_BSS_COLOR_MASK			= 0x000000fc,
 	IWL_RX_PHY_DATA0_ETH_SPATIAL_REUSE_MASK			= 0x00000f00,
@@ -367,8 +368,8 @@ enum iwl_rx_phy_eht_data1 {
 	/* number of EHT-LTF symbols 0 - 1 EHT-LTF, 1 - 2 EHT-LTFs, 2 - 4 EHT-LTFs,
 	 * 3 - 6 EHT-LTFs, 4 - 8 EHT-LTFs */
 	IWL_RX_PHY_DATA1_EHT_SIG_LTF_NUM		= 0x000000e0,
-	IWL_RX_PHY_DATA1_EHT_B0				= 0x00000100,
-	IWL_RX_PHY_DATA1_EHT_RU_B1_B7_ALLOC		= 0x0000fe00,
+	IWL_RX_PHY_DATA1_EHT_RU_ALLOC_B0		= 0x00000100,
+	IWL_RX_PHY_DATA1_EHT_RU_ALLOC_B1_B7		= 0x0000fe00,
 };
 
 /* goes into Metadata DW 7 */

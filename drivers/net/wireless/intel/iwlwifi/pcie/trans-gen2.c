@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
  * Copyright (C) 2017 Intel Deutschland GmbH
- * Copyright (C) 2018-2022 Intel Corporation
+ * Copyright (C) 2018-2023 Intel Corporation
  */
 #include "iwl-trans.h"
 #include "iwl-prph.h"
@@ -10,7 +10,7 @@
 #include "internal.h"
 #include "fw/dbg.h"
 
-#define FW_RESET_TIMEOUT (HZ / 5)
+#define FW_RESET_TIMEOUT (CPTCFG_IWL_TIMEOUT_FACTOR * HZ / 5)
 
 /*
  * Start up NIC's basic functionality after it has been reset
@@ -117,9 +117,14 @@ static void iwl_trans_pcie_fw_reset_handshake(struct iwl_trans *trans)
 				 trans_pcie->fw_reset_state != FW_RESET_REQUESTED,
 				 FW_RESET_TIMEOUT);
 	if (!ret || trans_pcie->fw_reset_state == FW_RESET_ERROR) {
-		IWL_INFO(trans,
-			 "firmware didn't ACK the reset - continue anyway\n");
-		iwl_trans_fw_error(trans, true);
+		u32 inta_hw = iwl_read32(trans, CSR_MSIX_HW_INT_CAUSES_AD);
+
+		IWL_ERR(trans,
+			"timeout waiting for FW reset ACK (inta_hw=0x%x)\n",
+			inta_hw);
+
+		if (!(inta_hw & MSIX_HW_INT_CAUSES_REG_RESET_DONE))
+			iwl_trans_fw_error(trans, true);
 	}
 
 	trans_pcie->fw_reset_state = FW_RESET_IDLE;
@@ -225,11 +230,14 @@ static int iwl_pcie_gen2_nic_init(struct iwl_trans *trans)
 	struct iwl_trans_pcie *trans_pcie = IWL_TRANS_GET_PCIE_TRANS(trans);
 	int queue_size = max_t(u32, IWL_CMD_QUEUE_SIZE,
 			       trans->cfg->min_txq_size);
+	int ret;
 
 	/* TODO: most of the logic can be removed in A0 - but not in Z0 */
 	spin_lock_bh(&trans_pcie->irq_lock);
-	iwl_pcie_gen2_apm_init(trans);
+	ret = iwl_pcie_gen2_apm_init(trans);
 	spin_unlock_bh(&trans_pcie->irq_lock);
+	if (ret)
+		return ret;
 
 	iwl_op_mode_nic_config(trans->op_mode);
 
@@ -386,7 +394,8 @@ static bool iwl_pcie_set_ltr(struct iwl_trans *trans)
 		/* First clear the interrupt, just in case */
 		iwl_write32(trans, CSR_MSIX_HW_INT_CAUSES_AD,
 			    MSIX_HW_INT_CAUSES_REG_IML);
-		/* In this case, unfortunately the same ROM bug exists in the
+		/*
+		 * In this case, unfortunately the same ROM bug exists in the
 		 * device (not setting LTR correctly), but we don't have control
 		 * over the settings from the host due to some hardware security
 		 * features. The only workaround we've been able to come up with
@@ -431,7 +440,8 @@ static void iwl_pcie_spin_for_iml(struct iwl_trans *trans)
 		       "Polled for IML load: irq=%d, loops=%d, CSR_LTR_LAST_MSG=0x%x\n",
 		       irq, loops, value);
 
-	/* We don't fail here even if we timed out - maybe we get lucky and the
+	/*
+	 * We don't fail here even if we timed out - maybe we get lucky and the
 	 * interrupt comes in later (and we get alive from firmware) and then
 	 * we're all happy - but if not we'll fail on alive timeout or get some
 	 * other error out.

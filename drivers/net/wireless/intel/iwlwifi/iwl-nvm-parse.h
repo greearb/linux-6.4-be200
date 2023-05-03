@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2005-2015, 2018-2021 Intel Corporation
+ * Copyright (C) 2005-2015, 2018-2022 Intel Corporation
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
 #ifndef __iwl_nvm_parse_h__
@@ -50,7 +50,7 @@ iwl_parse_nvm_data(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 struct ieee80211_regdomain *
 iwl_parse_nvm_mcc_info(struct device *dev, const struct iwl_cfg *cfg,
 		       int num_of_ch, __le32 *channels, u16 fw_mcc,
-		       u16 geo_info, u16 cap, u8 resp_ver);
+		       u16 geo_info, u32 cap, u8 resp_ver);
 
 /**
  * struct iwl_nvm_section - describes an NVM section in memory.
@@ -89,15 +89,5 @@ struct iwl_nvm_data *
 iwl_parse_mei_nvm_data(struct iwl_trans *trans, const struct iwl_cfg *cfg,
 		       const struct iwl_mei_nvm *mei_nvm,
 		       const struct iwl_fw *fw);
-
-/**
- * iwl_reinit_capab - Re-initialize the current HT, VHT and/or HE capabilities
- *
- * This should be called when changing values that affect the capabilities, such
- * as number of spatial streams.
- */
-void iwl_reinit_capab(struct iwl_trans *trans,
-		      struct iwl_nvm_data *data,
-		      u8 tx_chains, u8 rx_chains, const struct iwl_fw *fw);
 
 #endif /* __iwl_nvm_parse_h__ */

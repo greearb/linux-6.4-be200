@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2012-2014, 2018-2022 Intel Corporation
+ * Copyright (C) 2012-2014, 2018-2023 Intel Corporation
  * Copyright (C) 2013-2014 Intel Mobile Communications GmbH
  * Copyright (C) 2015-2016 Intel Deutschland GmbH
  */
@@ -10,7 +10,6 @@
 #include <linux/spinlock.h>
 #include <net/mac80211.h>
 #include <linux/wait.h>
-#include <linux/average.h>
 
 #include "iwl-trans.h" /* for IWL_MAX_TID_COUNT */
 #include "fw-api.h" /* IWL_MVM_STATION_COUNT_MAX */
@@ -18,9 +17,6 @@
 
 struct iwl_mvm;
 struct iwl_mvm_vif;
-
-/* This makes us a 'struct ewma_signal {' object. */
-DECLARE_EWMA(signal, 10, 8);
 
 /**
  * DOC: DQA - Dynamic Queue Allocation -introduction
@@ -340,6 +336,9 @@ struct iwl_mvm_rxq_dup_data {
  * @sta_id: the index of the station in the fw
  * @lq_sta: holds rate scaling data, either for the case when RS is done in
  *	the driver - %rs_drv or in the FW - %rs_fw.
+ * @orig_amsdu_len: used to save the original amsdu_len when it is changed via
+ *      debugfs.  If it's set to 0, it means that it is it's not set via
+ *      debugfs.
  * @avg_energy: energy as reported by FW statistics notification
  */
 struct iwl_mvm_link_sta {
@@ -350,11 +349,14 @@ struct iwl_mvm_link_sta {
 		struct iwl_lq_sta rs_drv;
 	} lq_sta;
 
+	u16 orig_amsdu_len;
+
 	u8 avg_energy;
 };
 
 /**
  * struct iwl_mvm_sta - representation of a station in the driver
+ * @vif: the interface the station belongs to
  * @tfd_queue_msk: the tfd queues used by the station
  * @mac_id_n_color: the MAC context this station is linked to
  * @tid_disable_agg: bitmap: if bit(tid) is set, the fw won't send ampdus for
@@ -378,9 +380,7 @@ struct iwl_mvm_link_sta {
  * @amsdu_enabled: bitmap of TX AMSDU allowed TIDs.
  *	In case TLC offload is not active it is either 0xFFFF or 0.
  * @max_amsdu_len: max AMSDU length
- * @orig_amsdu_len: used to save the original amsdu_len when it is changed via
- *      debugfs.  If it's set to 0, it means that it is it's not set via
- *      debugfs.
+ * @sleeping: indicates the station is sleeping (when not offloaded to FW)
  * @agg_tids: bitmap of tids whose status is operational aggregated (IWL_AGG_ON)
  * @sleep_tx_count: the number of frames that we told the firmware to let out
  *	even when that station is asleep. This is useful in case the queue
@@ -389,7 +389,6 @@ struct iwl_mvm_link_sta {
  *	the BA window. To be used for UAPSD only.
  * @ptk_pn: per-queue PTK PN data structures
  * @dup_data: per queue duplicate packet detection data
- * @deferred_traffic_tid_map: indication bitmap of deferred traffic per-TID
  * @tx_ant: the index of the antenna to use for data tx to this station. Only
  *	used during connection establishment (e.g. for the 4 way handshake
  *	exchange).
@@ -431,7 +430,6 @@ struct iwl_mvm_sta {
 	bool disable_tx;
 	u16 amsdu_enabled;
 	u16 max_amsdu_len;
-	u16 orig_amsdu_len;
 	bool sleeping;
 	u8 agg_tids;
 	u8 sleep_tx_count;
@@ -440,10 +438,6 @@ struct iwl_mvm_sta {
 
 	struct iwl_mvm_link_sta deflink;
 	struct iwl_mvm_link_sta __rcu *link[IEEE80211_MLD_MAX_NUM_LINKS];
-
-	struct ewma_signal rx_avg_chain_signal[2];
-	struct ewma_signal rx_avg_signal;
-	struct ewma_signal rx_avg_beacon_signal;
 };
 
 u16 iwl_mvm_tid_queued(struct iwl_mvm *mvm, struct iwl_mvm_tid_data *tid_data);
@@ -588,7 +582,7 @@ int iwl_mvm_add_pasn_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 			 u8 *key, u32 key_len);
 void iwl_mvm_cancel_channel_switch(struct iwl_mvm *mvm,
 				   struct ieee80211_vif *vif,
-				   u32 mac_id);
+				   u32 id);
 /* Queues */
 int iwl_mvm_tvqm_enable_txq(struct iwl_mvm *mvm,
 			    struct ieee80211_sta *sta,
@@ -624,7 +618,7 @@ int iwl_mvm_mac_sta_state_common(struct ieee80211_hw *hw,
 				 struct ieee80211_sta *sta,
 				 enum ieee80211_sta_state old_state,
 				 enum ieee80211_sta_state new_state,
-				 struct iwl_mvm_sta_state_ops *callbacks);
+				 const struct iwl_mvm_sta_state_ops *callbacks);
 
 /* New MLD STA related APIs */
 /* STA */
@@ -654,6 +648,11 @@ int iwl_mvm_mld_update_sta_links(struct iwl_mvm *mvm,
 				 u16 old_links, u16 new_links);
 u32 iwl_mvm_sta_fw_id_mask(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 			   int filter_link_id);
+int iwl_mvm_mld_add_int_sta_with_queue(struct iwl_mvm *mvm,
+				       struct iwl_mvm_int_sta *sta,
+				       const u8 *addr, int link_id,
+				       u16 *queue, u8 tid,
+				       unsigned int *_wdg_timeout);
 
 /* Queues */
 void iwl_mvm_mld_modify_all_sta_disable_tx(struct iwl_mvm *mvm,

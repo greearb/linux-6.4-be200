@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause */
 /*
- * Copyright (C) 2005-2014, 2018-2022 Intel Corporation
+ * Copyright (C) 2005-2014, 2018-2023 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016 Intel Deutschland GmbH
  */
@@ -197,6 +197,7 @@
 #define SCD_QUEUE_CTX_REG2_VAL(_n, _v)		FIELD_PREP(SCD_QUEUE_CTX_REG2_ ## _n, _v)
 
 #define SCD_GP_CTRL_ENABLE_31_QUEUES		BIT(0)
+#define SCD_GP_CTRL_DRAM_BC_TABLE_DUP_DIS	BIT(16)
 #define SCD_GP_CTRL_AUTO_ACTIVE_MODE		BIT(18)
 
 /* Context Data */
@@ -231,6 +232,7 @@
 #define SCD_CHAINEXT_EN		(SCD_BASE + 0x244)
 #define SCD_AGGR_SEL		(SCD_BASE + 0x248)
 #define SCD_INTERRUPT_MASK	(SCD_BASE + 0x108)
+#define SCD_CB_SIZE		(SCD_BASE + 0x1a4)
 #define SCD_GP_CTRL		(SCD_BASE + 0x1a8)
 #define SCD_EN_CTRL		(SCD_BASE + 0x254)
 
@@ -365,7 +367,6 @@
 #define DBGI_SRAM_FIFO_POINTERS_WR_PTR_MSK		0x00000FFF
 
 enum {
-	ENABLE_WFPM = BIT(31),
 	WFPM_AUX_CTL_AUX_IF_MAC_OWNER_MSK	= 0x80000000,
 };
 
@@ -382,6 +383,9 @@ enum {
 /* device family 22000 WPROT register */
 #define PREG_PRPH_WPROT_22000		0xA04D00
 
+#define SB_CFG_OVERRIDE_ADDR		0xA26C78
+#define SB_CFG_OVERRIDE_ENABLE		0x8000
+#define SB_CFG_BASE_OVERRIDE		0xA20000
 #define SB_MODIFY_CFG_FLAG		0xA03088
 #define SB_CFG_RESIDES_IN_OTP_MASK	0x10
 #define SB_CPU_1_STATUS			0xA01E30
@@ -411,12 +415,6 @@ enum {
 	LMPM_CHICK_EXTENDED_ADDR_SPACE = BIT(0),
 };
 
-/* FW chicken bits */
-#define LMPM_PAGE_PASS_NOTIF			0xA03824
-enum {
-	LMPM_PAGE_PASS_NOTIF_POS = BIT(20),
-};
-
 /*
  * CRF ID register
  *
@@ -433,12 +431,13 @@ enum {
 #define REG_CRF_ID_STEP(val)		(((val) & 0x07000000) >> 24)
 #define REG_CRF_ID_FLAVOR(val)		(((val) & 0xF8000000) >> 27)
 
+
 #define UREG_CHICK		(0xA05C00)
 #define UREG_CHICK_MSI_ENABLE	BIT(24)
 #define UREG_CHICK_MSIX_ENABLE	BIT(25)
 
-#define SD_REG_VER		0xa29600
-#define SD_REG_VER_GEN2		0x00a2b800
+#define SD_REG_VER	0xa29600
+#define SD_REG_VER_GEN2	0x00a2b800
 
 #define REG_CRF_ID_TYPE_JF_1			0x201
 #define REG_CRF_ID_TYPE_JF_2			0x202
@@ -486,6 +485,10 @@ enum {
 #define FSEQ_ALIVE_TOKEN		0xA340F0
 #define FSEQ_CNVI_ID			0xA3408C
 #define FSEQ_CNVR_ID			0xA34090
+#define FSEQ_PREV_CNVIO_INIT_VERSION	0xA34084
+#define FSEQ_WIFI_FSEQ_VERSION		0xA34040
+#define FSEQ_BT_FSEQ_VERSION		0xA34044
+#define FSEQ_CLASS_TP_VERSION		0xA34078
 
 #define IWL_D3_SLEEP_STATUS_SUSPEND	0xD3
 #define IWL_D3_SLEEP_STATUS_RESUME	0xD0

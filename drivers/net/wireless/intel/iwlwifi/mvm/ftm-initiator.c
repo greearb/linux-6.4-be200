@@ -72,15 +72,24 @@ int iwl_mvm_ftm_add_pasn_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	 * the TK is already configured for this station, so it
 	 * shouldn't be set again here.
 	 */
-	if (vif->cfg.assoc &&
-	    !memcmp(addr, vif->bss_conf.bssid, ETH_ALEN)) {
+	if (vif->cfg.assoc) {
 		struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
+		struct ieee80211_bss_conf *link_conf;
+		unsigned int link_id;
 		struct ieee80211_sta *sta;
+		u8 sta_id;
 
 		rcu_read_lock();
-		sta = rcu_dereference(mvm->fw_id_to_mac_id[mvmvif->deflink.ap_sta_id]);
-		if (!IS_ERR_OR_NULL(sta) && sta->mfp)
-			expected_tk_len = 0;
+		for_each_vif_active_link(vif, link_conf, link_id) {
+			if (memcmp(addr, link_conf->bssid, ETH_ALEN))
+				continue;
+
+			sta_id = mvmvif->link[link_id]->ap_sta_id;
+			sta = rcu_dereference(mvm->fw_id_to_mac_id[sta_id]);
+			if (!IS_ERR_OR_NULL(sta) && sta->mfp)
+				expected_tk_len = 0;
+			break;
+		}
 		rcu_read_unlock();
 	}
 
@@ -222,6 +231,15 @@ static void iwl_mvm_ftm_cmd_v5(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	cmd->request_id = req->cookie;
 	cmd->num_of_ap = req->n_peers;
 
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	if (IWL_MVM_FTM_INITIATOR_COMMON_CALIB) {
+		cmd->common_calib =
+			cpu_to_le16(IWL_MVM_FTM_INITIATOR_COMMON_CALIB);
+		cmd->initiator_flags =
+			cpu_to_le32(IWL_TOF_INITIATOR_FLAGS_COMMON_CALIB);
+	}
+#endif
+
 	/* use maximum for "no timeout" or bigger than what we can do */
 	if (!req->timeout || req->timeout > 255 * 100)
 		cmd->req_timeout = 255;
@@ -269,6 +287,12 @@ static void iwl_mvm_ftm_cmd_common(struct iwl_mvm *mvm,
 	for (i = 0; i < ETH_ALEN; i++)
 		cmd->macaddr_mask[i] = ~req->mac_addr_mask[i];
 
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	if (IWL_MVM_FTM_INITIATOR_FAST_ALGO_DISABLE)
+		cmd->initiator_flags |=
+			cpu_to_le32(IWL_TOF_INITIATOR_FLAGS_FAST_ALGO_DISABLED);
+#endif
+
 	if (vif->cfg.assoc) {
 		memcpy(cmd->range_req_bssid, vif->bss_conf.bssid, ETH_ALEN);
 
@@ -295,6 +319,15 @@ static void iwl_mvm_ftm_cmd_v8(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 			       struct cfg80211_pmsr_request *req)
 {
 	iwl_mvm_ftm_cmd_common(mvm, vif, (void *)cmd, req);
+
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	if (IWL_MVM_FTM_INITIATOR_COMMON_CALIB) {
+		((struct iwl_tof_range_req_cmd_v7 *)cmd)->common_calib =
+			cpu_to_le16(IWL_MVM_FTM_INITIATOR_COMMON_CALIB);
+		((struct iwl_tof_range_req_cmd_v7 *)cmd)->initiator_flags |=
+			cpu_to_le32(IWL_TOF_INITIATOR_FLAGS_COMMON_CALIB);
+	}
+#endif
 }
 
 static int
@@ -416,6 +449,9 @@ iwl_mvm_ftm_put_target_v2(struct iwl_mvm *mvm,
 		target->location_req |= IWL_TOF_LOC_CIVIC;
 
 	target->algo_type = IWL_MVM_FTM_INITIATOR_ALGO;
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	target->notify_mcsi = IWL_MVM_FTM_INITIATOR_MCSI_ENABLED;
+#endif
 
 	return 0;
 }
@@ -461,6 +497,11 @@ iwl_mvm_ftm_put_target_common(struct iwl_mvm *mvm,
 	if ((peer->ftm.trigger_based || peer->ftm.non_trigger_based) &&
 	    peer->ftm.lmr_feedback)
 		FTM_PUT_FLAG(LMR_FEEDBACK);
+
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	if (IWL_MVM_FTM_INITIATOR_MCSI_ENABLED)
+		FTM_PUT_FLAG(MCSI_REPORT);
+#endif
 }
 
 static int
@@ -518,25 +559,30 @@ iwl_mvm_ftm_put_target(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 
 	iwl_mvm_ftm_put_target_common(mvm, peer, target);
 
-	if (vif->cfg.assoc &&
-	    !memcmp(peer->addr, vif->bss_conf.bssid, ETH_ALEN)) {
+	if (vif->cfg.assoc) {
 		struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
 		struct ieee80211_sta *sta;
+		struct ieee80211_bss_conf *link_conf;
+		unsigned int link_id;
 
 		rcu_read_lock();
+		for_each_vif_active_link(vif, link_conf, link_id) {
+			if (memcmp(peer->addr, link_conf->bssid, ETH_ALEN))
+				continue;
 
-		sta = rcu_dereference(mvm->fw_id_to_mac_id[mvmvif->deflink.ap_sta_id]);
-		if (WARN_ON_ONCE(IS_ERR_OR_NULL(sta))) {
-			rcu_read_unlock();
-			return PTR_ERR_OR_ZERO(sta);
+			target->sta_id = mvmvif->link[link_id]->ap_sta_id;
+			sta = rcu_dereference(mvm->fw_id_to_mac_id[target->sta_id]);
+			if (WARN_ON_ONCE(IS_ERR_OR_NULL(sta))) {
+				rcu_read_unlock();
+				return PTR_ERR_OR_ZERO(sta);
+			}
+
+			if (sta->mfp && (peer->ftm.trigger_based ||
+					 peer->ftm.non_trigger_based))
+				FTM_PUT_FLAG(PMF);
+			break;
 		}
-
-		if (sta->mfp && (peer->ftm.trigger_based || peer->ftm.non_trigger_based))
-			FTM_PUT_FLAG(PMF);
-
 		rcu_read_unlock();
-
-		target->sta_id = mvmvif->deflink.ap_sta_id;
 	} else {
 		target->sta_id = IWL_MVM_INVALID_STA;
 	}
@@ -645,6 +691,28 @@ static int iwl_mvm_ftm_start_v8(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	return iwl_mvm_ftm_send_cmd(mvm, &hcmd);
 }
 
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+static void iwl_mvm_ftm_set_calib(struct iwl_mvm *mvm,
+				  struct iwl_tof_range_req_ap_entry_v6 *target)
+{
+	if (IWL_MVM_FTM_INITIATOR_COMMON_CALIB) {
+		int j;
+
+		/*
+		 * The driver API only supports one calibration value.
+		 * For now, use it for all bandwidths.
+		 * TODO: Add support for per bandwidth calibration
+		 * values.
+		 */
+		for (j = 0; j < IWL_TOF_BW_NUM; j++)
+			target->calib[j] =
+				cpu_to_le16(IWL_MVM_FTM_INITIATOR_COMMON_CALIB);
+
+		FTM_PUT_FLAG(USE_CALIB);
+	}
+}
+#endif
+
 static int iwl_mvm_ftm_start_v9(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 				struct cfg80211_pmsr_request *req)
 {
@@ -667,6 +735,10 @@ static int iwl_mvm_ftm_start_v9(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 		err = iwl_mvm_ftm_put_target(mvm, vif, peer, target);
 		if (err)
 			return err;
+
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+		iwl_mvm_ftm_set_calib(mvm, target);
+#endif
 	}
 
 	return iwl_mvm_ftm_send_cmd(mvm, &hcmd);
@@ -741,6 +813,10 @@ iwl_mvm_ftm_put_target_v7(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	int err = iwl_mvm_ftm_put_target(mvm, vif, peer, (void *)target);
 	if (err)
 		return err;
+
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+	iwl_mvm_ftm_set_calib(mvm, (void *)target);
+#endif
 
 	iwl_mvm_ftm_set_secured_ranging(mvm, vif, target);
 	return err;
@@ -883,6 +959,11 @@ static int iwl_mvm_ftm_start_v13(struct iwl_mvm *mvm,
 
 		target->band =
 			iwl_mvm_phy_band_from_nl80211(peer->chandef.chan->band);
+
+#ifdef CPTCFG_IWLWIFI_SUPPORT_DEBUG_OVERRIDES
+		if (IWL_MVM_FTM_LMR_FEEDBACK_TERMINATE)
+			FTM_PUT_FLAG(TERMINATE_ON_LMR_FEEDBACK);
+#endif
 	}
 
 	return iwl_mvm_ftm_send_cmd(mvm, &hcmd);

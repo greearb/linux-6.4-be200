@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2012-2015, 2018-2022 Intel Corporation
+ * Copyright (C) 2012-2015, 2018-2023 Intel Corporation
  * Copyright (C) 2013-2015 Intel Mobile Communications GmbH
  * Copyright (C) 2016-2017 Intel Deutschland GmbH
  */
@@ -60,22 +60,28 @@ u32 iwl_mvm_get_sta_ampdu_dens(struct ieee80211_link_sta *link_sta,
 	if (WARN_ON(!link_sta))
 		return 0;
 
-	if (link_sta->ht_cap.ht_supported)
-		mpdu_dens = link_sta->ht_cap.ampdu_density;
+	/*
+	 * Note that we always use only legacy & highest supported PPDUs, so
+	 * of Draft P802.11be D.30 Table 10-12a--Fields used for calculating
+	 * the maximum A-MPDU size of various PPDU types in different bands,
+	 * we only need to worry about the highest supported PPDU type here.
+	 */
 
-	if (link_conf->chandef.chan->band ==
-	    NL80211_BAND_6GHZ) {
+	if (link_sta->ht_cap.ht_supported) {
+		agg_size = link_sta->ht_cap.ampdu_factor;
+		mpdu_dens = link_sta->ht_cap.ampdu_density;
+	}
+
+	if (link_conf->chandef.chan->band == NL80211_BAND_6GHZ) {
+		/* overwrite HT values on 6 GHz */
 		mpdu_dens = le16_get_bits(link_sta->he_6ghz_capa.capa,
 					  IEEE80211_HE_6GHZ_CAP_MIN_MPDU_START);
 		agg_size = le16_get_bits(link_sta->he_6ghz_capa.capa,
 					 IEEE80211_HE_6GHZ_CAP_MAX_AMPDU_LEN_EXP);
 	} else if (link_sta->vht_cap.vht_supported) {
-		agg_size = link_sta->vht_cap.cap &
-			IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_MASK;
-		agg_size >>=
-			IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_SHIFT;
-	} else if (link_sta->ht_cap.ht_supported) {
-		agg_size = link_sta->ht_cap.ampdu_factor;
+		/* if VHT supported overwrite HT value */
+		agg_size = u32_get_bits(link_sta->vht_cap.cap,
+					IEEE80211_VHT_CAP_MAX_A_MPDU_LENGTH_EXPONENT_MASK);
 	}
 
 	/* D6.0 10.12.2 A-MPDU length limit rules
@@ -87,14 +93,16 @@ u32 iwl_mvm_get_sta_ampdu_dens(struct ieee80211_link_sta *link_sta,
 	 * Capabilities element
 	 */
 	if (link_sta->he_cap.has_he)
-		agg_size +=
-			u8_get_bits(link_sta->he_cap.he_cap_elem.mac_cap_info[3],
-				    IEEE80211_HE_MAC_CAP3_MAX_AMPDU_LEN_EXP_MASK);
+		agg_size += u8_get_bits(link_sta->he_cap.he_cap_elem.mac_cap_info[3],
+					IEEE80211_HE_MAC_CAP3_MAX_AMPDU_LEN_EXP_MASK);
+
+	if (link_sta->eht_cap.has_eht)
+		agg_size += u8_get_bits(link_sta->eht_cap.eht_cap_elem.mac_cap_info[1],
+					IEEE80211_EHT_MAC_CAP1_MAX_AMPDU_LEN_MASK);
 
 	/* Limit to max A-MPDU supported by FW */
-	if (agg_size > (STA_FLG_MAX_AGG_SIZE_4M >> STA_FLG_MAX_AGG_SIZE_SHIFT))
-		agg_size = (STA_FLG_MAX_AGG_SIZE_4M >>
-			    STA_FLG_MAX_AGG_SIZE_SHIFT);
+	agg_size = min_t(u32, agg_size,
+			 STA_FLG_MAX_AGG_SIZE_4M >> STA_FLG_MAX_AGG_SIZE_SHIFT);
 
 	*_agg_size = agg_size;
 	return mpdu_dens;
@@ -819,7 +827,7 @@ static int iwl_mvm_get_queue_size(struct ieee80211_sta *sta)
 		if (!link)
 			continue;
 
-		/* support for 1k ba size */
+		/* support for 512 ba size */
 		if (link->eht_cap.has_eht &&
 		    max_size < IWL_DEFAULT_QUEUE_SIZE_EHT)
 			max_size = IWL_DEFAULT_QUEUE_SIZE_EHT;
@@ -859,9 +867,7 @@ int iwl_mvm_tvqm_enable_txq(struct iwl_mvm *mvm,
 		struct iwl_mvm_sta *mvmsta = iwl_mvm_sta_from_mac80211(sta);
 		unsigned int link_id;
 
-		for (link_id = 0;
-		     link_id < ARRAY_SIZE(mvmsta->link);
-		     link_id++) {
+		for (link_id = 0; link_id < ARRAY_SIZE(mvmsta->link); link_id++) {
 			struct iwl_mvm_link_sta *link =
 				rcu_dereference_protected(mvmsta->link[link_id],
 							  lockdep_is_held(&mvm->mutex));
@@ -1679,7 +1685,7 @@ static int iwl_mvm_add_int_sta_common(struct iwl_mvm *mvm,
 	memset(&cmd, 0, sizeof(cmd));
 	cmd.sta_id = sta->sta_id;
 
-	if (iwl_fw_lookup_cmd_ver(mvm->fw, ADD_STA, 0) >= 12 &&
+	if (iwl_mvm_has_new_station_api(mvm->fw) &&
 	    sta->type == IWL_STA_AUX_ACTIVITY)
 		cmd.mac_id_n_color = cpu_to_le32(mac_id);
 	else
@@ -1747,7 +1753,6 @@ int iwl_mvm_sta_init(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 			mvm_sta->deflink.lq_sta.rs_drv.pers.max_agg_bufsize =
 				LINK_QUAL_AGG_FRAME_LIMIT_GEN2_DEF;
 	}
-
 	mvm_sta->tt_tx_protection = false;
 	mvm_sta->sta_type = sta_type;
 
@@ -1836,11 +1841,6 @@ int iwl_mvm_add_sta(struct iwl_mvm *mvm,
 
 	spin_lock_init(&mvm_sta->lock);
 
-	ewma_signal_init(&mvm_sta->rx_avg_chain_signal[0]);
-	ewma_signal_init(&mvm_sta->rx_avg_chain_signal[1]);
-	ewma_signal_init(&mvm_sta->rx_avg_signal);
-	ewma_signal_init(&mvm_sta->rx_avg_beacon_signal);
-
 	/* if this is a HW restart re-alloc existing queues */
 	if (test_bit(IWL_MVM_STATUS_IN_HW_RESTART, &mvm->status)) {
 		struct iwl_mvm_int_sta tmp_sta = {
@@ -1848,7 +1848,8 @@ int iwl_mvm_add_sta(struct iwl_mvm *mvm,
 			.type = mvm_sta->sta_type,
 		};
 
-		/* First add an empty station since allocating
+		/*
+		 * First add an empty station since allocating
 		 * a queue requires a valid station
 		 */
 		ret = iwl_mvm_add_int_sta_common(mvm, &tmp_sta, sta->addr,
@@ -1864,6 +1865,8 @@ int iwl_mvm_add_sta(struct iwl_mvm *mvm,
 
 	ret = iwl_mvm_sta_init(mvm, vif, sta, sta_id,
 			       sta->tdls ? IWL_STA_TDLS_LINK : IWL_STA_LINK);
+	if (ret)
+		goto err;
 
 update_fw:
 	ret = iwl_mvm_sta_send_to_fw(mvm, sta, sta_update, sta_flags);
@@ -2019,17 +2022,15 @@ bool iwl_mvm_sta_del(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 		     struct ieee80211_link_sta *link_sta, int *ret)
 {
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
-	struct iwl_mvm_vif_link_info *mvm_link =
-		mvmvif->link[link_sta->link_id];
+	struct iwl_mvm_vif_link_info *mvm_link = mvmvif->link[link_sta->link_id];
 	struct iwl_mvm_sta *mvm_sta = iwl_mvm_sta_from_mac80211(sta);
 	struct iwl_mvm_link_sta *mvm_link_sta;
 	u8 sta_id;
 
 	lockdep_assert_held(&mvm->mutex);
 
-	mvm_link_sta =
-		rcu_dereference_protected(mvm_sta->link[link_sta->link_id],
-					  lockdep_is_held(&mvm->mutex));
+	mvm_link_sta = rcu_dereference_protected(mvm_sta->link[link_sta->link_id],
+						 lockdep_is_held(&mvm->mutex));
 	sta_id = mvm_link_sta->sta_id;
 
 	/* If there is a TXQ still marked as reserved - free it */
@@ -2074,13 +2075,6 @@ bool iwl_mvm_sta_del(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 		mvm->tdls_cs.peer.sta_id = IWL_MVM_INVALID_STA;
 		cancel_delayed_work(&mvm->tdls_cs.dwork);
 	}
-
-	/*
-	 * Make sure that the tx response code sees the station as -EBUSY and
-	 * calls the drain worker.
-	 */
-	spin_lock_bh(&mvm_sta->lock);
-	spin_unlock_bh(&mvm_sta->lock);
 
 	return false;
 }
@@ -2887,7 +2881,7 @@ int iwl_mvm_sta_rx_agg(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 	}
 
 	if (iwl_mvm_has_new_rx_api(mvm) && start) {
-		u16 reorder_buf_size = buf_size * sizeof(baid_data->entries[0]);
+		u32 reorder_buf_size = buf_size * sizeof(baid_data->entries[0]);
 
 		/* sparse doesn't like the __align() so don't check */
 #ifndef __CHECKER__
@@ -2995,6 +2989,7 @@ int iwl_mvm_sta_rx_agg(struct iwl_mvm *mvm, struct ieee80211_sta *sta,
 		/* synchronize all rx queues so we can safely delete */
 		iwl_mvm_free_reorder(mvm, baid_data);
 		timer_shutdown_sync(&baid_data->session_timer);
+
 		RCU_INIT_POINTER(mvm->baid_map[baid], NULL);
 		kfree_rcu(baid_data, rcu_head);
 		IWL_DEBUG_HT(mvm, "BAID %d is free\n", baid);
@@ -3309,8 +3304,7 @@ out:
 	 * aggregation sessions and our default value.
 	 */
 	mvmsta->deflink.lq_sta.rs_drv.pers.max_agg_bufsize =
-		min(mvmsta->deflink.lq_sta.rs_drv.pers.max_agg_bufsize,
-		    buf_size);
+		min(mvmsta->deflink.lq_sta.rs_drv.pers.max_agg_bufsize, buf_size);
 	mvmsta->deflink.lq_sta.rs_drv.lq.agg_frame_cnt_limit =
 		mvmsta->deflink.lq_sta.rs_drv.pers.max_agg_bufsize;
 
@@ -4311,16 +4305,27 @@ int iwl_mvm_add_pasn_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	u16 queue;
 	struct iwl_mvm_vif *mvmvif = iwl_mvm_vif_from_mac80211(vif);
 	struct ieee80211_key_conf *keyconf;
+	unsigned int wdg_timeout =
+		iwl_mvm_get_wd_timeout(mvm, vif, false, false);
+	bool mld = iwl_mvm_has_mld_api(mvm->fw);
+	u32 type = mld ? STATION_TYPE_PEER : IWL_STA_LINK;
 
 	ret = iwl_mvm_allocate_int_sta(mvm, sta, 0,
-				       NL80211_IFTYPE_UNSPECIFIED,
-				       IWL_STA_LINK);
+				       NL80211_IFTYPE_UNSPECIFIED, type);
 	if (ret)
 		return ret;
 
-	ret = iwl_mvm_add_int_sta_with_queue(mvm, mvmvif->id, mvmvif->color,
-					     addr, sta, &queue,
-					     IWL_MVM_TX_FIFO_BE);
+	if (mld)
+		ret = iwl_mvm_mld_add_int_sta_with_queue(mvm, sta, addr,
+							 mvmvif->deflink.fw_link_id,
+							 &queue,
+							 IWL_MAX_TID_COUNT,
+							 &wdg_timeout);
+	else
+		ret = iwl_mvm_add_int_sta_with_queue(mvm, mvmvif->id,
+						     mvmvif->color, addr, sta,
+						     &queue,
+						     IWL_MVM_TX_FIFO_BE);
 	if (ret)
 		goto out;
 
@@ -4333,9 +4338,24 @@ int iwl_mvm_add_pasn_sta(struct iwl_mvm *mvm, struct ieee80211_vif *vif,
 	keyconf->cipher = cipher;
 	memcpy(keyconf->key, key, key_len);
 	keyconf->keylen = key_len;
+	keyconf->flags = IEEE80211_KEY_FLAG_PAIRWISE;
 
-	ret = iwl_mvm_send_sta_key(mvm, sta->sta_id, keyconf, false,
-				   0, NULL, 0, 0, true);
+	if (mld) {
+		/*
+		 * The MFP flag is set according to the station mfp field. Since
+		 * we don't have a station, set it manually.
+		 */
+		u32 key_flags =
+			iwl_mvm_get_sec_flags(mvm, vif, NULL, keyconf) |
+			IWL_SEC_KEY_FLAG_MFP;
+		u32 sta_mask = BIT(sta->sta_id);
+
+		ret = iwl_mvm_mld_send_key(mvm, sta_mask, key_flags, keyconf);
+	} else {
+		ret = iwl_mvm_send_sta_key(mvm, sta->sta_id, keyconf, false,
+					   0, NULL, 0, 0, true);
+	}
+
 	kfree(keyconf);
 	return 0;
 out:
@@ -4345,10 +4365,10 @@ out:
 
 void iwl_mvm_cancel_channel_switch(struct iwl_mvm *mvm,
 				   struct ieee80211_vif *vif,
-				   u32 mac_id)
+				   u32 id)
 {
 	struct iwl_cancel_channel_switch_cmd cancel_channel_switch_cmd = {
-		.mac_id = cpu_to_le32(mac_id),
+		.id = cpu_to_le32(id),
 	};
 	int ret;
 

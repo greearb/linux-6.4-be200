@@ -76,6 +76,8 @@ enum iwl_tx_flags {
  *	to a secured STA
  * @IWL_TX_FLAGS_HIGH_PRI: high priority frame (like EAPOL) - can affect rate
  *	selection, retry limits and BT kill
+ * @IWL_TX_FLAGS_RTS: firmware used an RTS
+ * @IWL_TX_FLAGS_CTS: firmware used CTS-to-self
  */
 enum iwl_tx_cmd_flags {
 	IWL_TX_FLAGS_CMD_RATE		= BIT(0),
@@ -178,8 +180,8 @@ enum iwl_tx_offload_assist_flags_pos {
 #define IWL_TX_CMD_OFFLD_IP_HDR_MASK	0x3f
 
 enum iwl_tx_offload_assist_bz {
-	IWL_TX_CMD_OFFLD_BZ_RESULT_OFFS		= 0x000003ff,
-	IWL_TX_CMD_OFFLD_BZ_START_OFFS		= 0x001ff800,
+	IWL_TX_CMD_OFFLD_BZ_RESULT_OFFS		= 0x000007ff,
+	IWL_TX_CMD_OFFLD_BZ_START_OFFS		= 0x003ff800,
 	IWL_TX_CMD_OFFLD_BZ_MH_LEN		= 0x07c00000,
 	IWL_TX_CMD_OFFLD_BZ_MH_PAD		= 0x08000000,
 	IWL_TX_CMD_OFFLD_BZ_AMSDU		= 0x10000000,
@@ -819,10 +821,9 @@ struct iwl_mac_beacon_cmd {
 	__le32 csa_offset;
 	struct ieee80211_hdr frame[];
 } __packed; /* BEACON_TEMPLATE_CMD_API_S_VER_10,
-	     * BEACON_TEMPLATE_CMD_API_S_VER_11,
-	     * BEACON_TEMPLATE_CMD_API_S_VER_12,
-	     * BEACON_TEMPLATE_CMD_API_S_VER_13
-	     */
+	       BEACON_TEMPLATE_CMD_API_S_VER_11,
+	       BEACON_TEMPLATE_CMD_API_S_VER_12
+	       BEACON_TEMPLATE_CMD_API_S_VER_13 */
 
 struct iwl_beacon_notif {
 	struct iwl_mvm_tx_resp beacon_notify_hdr;
@@ -895,6 +896,7 @@ struct iwl_tx_path_flush_cmd {
 
 /**
  * struct iwl_flush_queue_info - virtual flush queue info
+ * @tid: the tid to flush
  * @queue_num: virtual queue id
  * @read_before_flush: read pointer before flush
  * @read_after_flush: read pointer after flush
@@ -908,6 +910,7 @@ struct iwl_flush_queue_info {
 
 /**
  * struct iwl_tx_path_flush_cmd_rsp -- queue/FIFO flush command response
+ * @sta_id: the station for which the queue was flushed
  * @num_flushed_queues: number of queues in queues array
  * @queues: all flushed queues
  */

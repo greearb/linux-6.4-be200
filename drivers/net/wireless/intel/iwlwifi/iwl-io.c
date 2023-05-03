@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
- * Copyright (C) 2003-2014, 2018-2021 Intel Corporation
+ * Copyright (C) 2003-2014, 2018-2022 Intel Corporation
  * Copyright (C) 2015-2016 Intel Deutschland GmbH
  */
 #include <linux/delay.h>
@@ -72,6 +72,7 @@ u32 iwl_read_direct32(struct iwl_trans *trans, u32 reg)
 		return value;
 	}
 
+	/* return as if we have a HW timeout/failure */
 	return 0x5a5a5a5a;
 }
 IWL_EXPORT_SYMBOL(iwl_read_direct32);
@@ -143,6 +144,7 @@ u32 iwl_read_prph(struct iwl_trans *trans, u32 ofs)
 		return val;
 	}
 
+	/* return as if we have a HW timeout/failure */
 	return 0x5a5a5a5a;
 }
 IWL_EXPORT_SYMBOL(iwl_read_prph);
@@ -273,7 +275,7 @@ static int iwl_dump_rfh(struct iwl_trans *trans, char **buf)
 		{ RFH_Q0_URBD_STTS_WPTR_LSB, true },
 	};
 
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	if (buf) {
 		int pos = 0;
 		/*
@@ -369,7 +371,7 @@ int iwl_dump_fh(struct iwl_trans *trans, char **buf)
 	if (trans->trans_cfg->mq_rx_supported)
 		return iwl_dump_rfh(trans, buf);
 
-#ifdef CONFIG_IWLWIFI_DEBUGFS
+#ifdef CPTCFG_IWLWIFI_DEBUGFS
 	if (buf) {
 		int pos = 0;
 		size_t bufsz = ARRAY_SIZE(fh_tbl) * 48 + 40;
