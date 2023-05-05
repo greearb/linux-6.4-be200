@@ -15,7 +15,7 @@ struct iwl_mvm_quota_iterator_data {
 	int n_interfaces[MAX_BINDINGS];
 	int colors[MAX_BINDINGS];
 	int low_latency[MAX_BINDINGS];
-#ifdef CPTCFG_IWLWIFI_DEBUGFS
+#ifdef CONFIG_IWLWIFI_DEBUGFS
 	int dbgfs_min[MAX_BINDINGS];
 #endif
 	int n_low_latency_bindings;
@@ -74,7 +74,7 @@ static void iwl_mvm_quota_iterator(void *_data, u8 *mac,
 
 	data->n_interfaces[id]++;
 
-#ifdef CPTCFG_IWLWIFI_DEBUGFS
+#ifdef CONFIG_IWLWIFI_DEBUGFS
 	if (mvmvif->dbgfs_quota_min)
 		data->dbgfs_min[id] = max(data->dbgfs_min[id],
 					  mvmvif->dbgfs_quota_min);
@@ -86,7 +86,7 @@ static void iwl_mvm_quota_iterator(void *_data, u8 *mac,
 	}
 }
 
-#ifdef CPTCFG_IWLMVM_P2P_OPPPS_TEST_WA
+#ifdef CONFIG_IWLMVM_P2P_OPPPS_TEST_WA
 /*
  * Zero quota for P2P client MAC as part of a WA to pass P2P OPPPS certification
  * test. Refer to IWLMVM_P2P_OPPPS_TEST_WA description in Kconfig.noupstream for
@@ -122,7 +122,7 @@ static void iwl_mvm_adjust_quota_for_p2p_wa(struct iwl_mvm *mvm,
 static void iwl_mvm_adjust_quota_for_noa(struct iwl_mvm *mvm,
 					 struct iwl_time_quota_cmd *cmd)
 {
-#ifdef CPTCFG_NL80211_TESTMODE
+#ifdef CONFIG_NL80211_TESTMODE
 	struct iwl_mvm_vif *mvmvif;
 	int i, phy_id = -1, beacon_int = 0;
 
@@ -254,7 +254,7 @@ int iwl_mvm_update_quotas(struct iwl_mvm *mvm,
 
 		if (data.n_interfaces[i] <= 0)
 			qdata->quota = cpu_to_le32(0);
-#ifdef CPTCFG_IWLWIFI_DEBUGFS
+#ifdef CONFIG_IWLWIFI_DEBUGFS
 		else if (data.dbgfs_min[i])
 			qdata->quota =
 				cpu_to_le32(data.dbgfs_min[i] * QUOTA_100 / 100);
@@ -313,7 +313,7 @@ int iwl_mvm_update_quotas(struct iwl_mvm *mvm,
 			  "zero quota on binding %d\n", i);
 	}
 
-#ifdef CPTCFG_IWLMVM_P2P_OPPPS_TEST_WA
+#ifdef CONFIG_IWLMVM_P2P_OPPPS_TEST_WA
 	/*
 	 * Zero quota for P2P client MAC as part of a WA to pass P2P OPPPS
 	 * certification test. Refer to IWLMVM_P2P_OPPPS_TEST_WA description in
