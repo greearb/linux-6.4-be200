@@ -541,7 +541,7 @@ extern const char iwl_ax231_name[];
 extern const char iwl_ax411_name[];
 extern const char iwl_bz_name[];
 extern const char iwl_sc_name[];
-#if IS_ENABLED(CCONFIG_IWLMVM)
+#if IS_ENABLED(CONFIG_IWLMVM)
 extern const struct iwl_ht_params iwl_22000_ht_params;
 extern const struct iwl_cfg iwl7260_2ac_cfg;
 extern const struct iwl_cfg iwl7260_2ac_cfg_high_temp;

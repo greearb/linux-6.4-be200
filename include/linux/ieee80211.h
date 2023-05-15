@@ -4489,6 +4489,9 @@ static inline bool for_each_element_completed(const struct element *element,
 #define IEEE80211_RNR_TBTT_PARAMS_PROBE_ACTIVE			0x20
 #define IEEE80211_RNR_TBTT_PARAMS_COLOC_AP			0x40
 
+#define IEEE80211_RNR_TBTT_PARAMS_PSD_NO_LIMIT                  127
+#define IEEE80211_RNR_TBTT_PARAMS_PSD_RESERVED                  -128
+
 struct ieee80211_neighbor_ap_info {
 	u8 tbtt_info_hdr;
 	u8 tbtt_info_len;

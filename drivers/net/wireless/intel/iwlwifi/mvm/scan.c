@@ -1783,11 +1783,12 @@ iwl_mvm_umac_scan_cfg_channels_v7_6g(struct iwl_mvm *mvm,
 		 */
 		n_used_bssid_entries = 3;
 		for (j = 0; j < params->n_6ghz_params; j++) {
-			s8 tmp_psd_20;
+//			s8 tmp_psd_20;
 
 			if (!(scan_6ghz_params[j].channel_idx == i))
 				continue;
 
+#if 0 /* TODO:  BEN  Fix this when porting forward. */
 			/* Use the highest PSD value allowed as advertised by
 			 * APs for this channel
 			 */
@@ -1798,6 +1799,7 @@ iwl_mvm_umac_scan_cfg_channels_v7_6g(struct iwl_mvm *mvm,
 			     IEEE80211_RNR_TBTT_PARAMS_PSD_RESERVED ||
 			     psd_20 < tmp_psd_20))
 				psd_20 = tmp_psd_20;
+#endif
 
 			found = false;
 			unsolicited_probe_on_chan |=
